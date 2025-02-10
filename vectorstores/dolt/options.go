@@ -10,8 +10,8 @@ import (
 const (
 	DefaultDatabaseName             = "langchain"
 	DefaultPreDeleteDatabase        = false
-	DefaultEmbeddingStoreTableName  = "langchain_pg_embedding"
-	DefaultCollectionStoreTableName = "langchain_pg_collection"
+	DefaultEmbeddingStoreTableName  = "langchain_dolt_embedding"
+	DefaultCollectionStoreTableName = "langchain_dolt_collection"
 )
 
 // ErrInvalidOptions is returned when the options given are invalid.

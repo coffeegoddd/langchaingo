@@ -116,7 +116,7 @@ func (s Store) createCollectionTableIfNotExists(ctx context.Context, tx *sql.Tx)
 	sql := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
 	name varchar(2048),
 	cmetadata json,
-	"uuid" varchar(36) NOT NULL,
+	`+"`uuid`"+` varchar(36) NOT NULL,
 	UNIQUE (name),
 	PRIMARY KEY (uuid))`, s.collectionTableName)
 	if _, err := tx.ExecContext(ctx, sql); err != nil {
@@ -131,21 +131,49 @@ func (s Store) createEmbeddingTableIfNotExists(ctx context.Context, tx *sql.Tx) 
 	embedding json,
 	document longtext,
 	cmetadata json,
-	"uuid" varchar(36) NOT NULL,
-	CONSTRAINT langchain_pg_embedding_collection_id_fkey
+	`+"`uuid`"+` varchar(36) NOT NULL,
+	CONSTRAINT langchain_dolt_embedding_collection_id_fkey
 	FOREIGN KEY (collection_id) REFERENCES %s (uuid) ON DELETE CASCADE,
 	PRIMARY KEY (uuid))`, s.embeddingTableName, s.collectionTableName)
 	if _, err := tx.ExecContext(ctx, sql); err != nil {
 		return err
 	}
 
-	sql = fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %s_collection_id ON %s (collection_id)`, s.embeddingTableName, s.embeddingTableName)
+	sql = fmt.Sprintf(`SET @index_name = '%s_collection_id';
+SET @table_name = '%s';
+
+SELECT COUNT(*)
+INTO @index_exists
+FROM information_schema.statistics
+WHERE table_schema = DATABASE()
+  AND table_name = @table_name
+  AND index_name = @index_name;
+
+SET @sql = IF(@index_exists = 0, CONCAT('CREATE INDEX ', @index_name, ' ON ', @table_name, ' (collection_id)'), 'SELECT ''Index already exists''');
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;`, s.embeddingTableName, s.embeddingTableName)
 	if _, err := tx.ExecContext(ctx, sql); err != nil {
 		return err
 	}
 
 	if !s.createEmbeddingIndexAfterAddDocuments {
-		sql = fmt.Sprintf(`CREATE VECTOR INDEX IF NOT EXISTS %s_embedding_idx ON %s (embedding)`, s.embeddingTableName, s.embeddingTableName)
+		sql = fmt.Sprintf(`SET @index_name = '%s_embedding_idx';
+SET @table_name = '%s';
+
+SELECT COUNT(*)
+INTO @index_exists
+FROM information_schema.statistics
+WHERE table_schema = DATABASE()
+	AND table_name = @table_name
+	AND index_name = @index_name;
+
+SET @sql = IF(@index_exists = 0, CONCAT('CREATE VECTOR INDEX ', @index_name, ' ON ', @table_name, ' (embedding)'), 'SELECT ''Index already exists''');
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;`, s.embeddingTableName, s.embeddingTableName)
 		if _, err := tx.ExecContext(ctx, sql); err != nil {
 			return err
 		}
@@ -186,11 +214,13 @@ func (s Store) AddDocuments(
 		return nil, ErrEmbedderWrongNumberVectors
 	}
 
-	batchedValues := make([]string, 0, len(docs))
 	ids := make([]string, len(docs))
+	valueStrings := make([]string, 0, len(docs))
+	valueArgs := make([]interface{}, 0, len(docs)*2)
 	for docIdx, doc := range docs {
 		id := uuid.New().String()
 		ids[docIdx] = id
+		valueStrings = append(valueStrings, "(?, ?, ?, ?, ?)")
 		jsonEmbedding, err := json.Marshal(vectors[docIdx])
 		if err != nil {
 			return nil, err
@@ -199,21 +229,64 @@ func (s Store) AddDocuments(
 		if err != nil {
 			return nil, err
 		}
-		batchedValues = append(batchedValues, fmt.Sprintf("(%s, %s, %s, %s, %s)", id, doc.PageContent, jsonEmbedding, jsonMetadata, s.databaseUUID))
+		valueArgs = append(valueArgs, id, doc.PageContent, jsonEmbedding, jsonMetadata, s.databaseUUID)
 	}
 
-	sql := fmt.Sprintf(`INSERT INTO %s (uuid, document, embedding, cmetadata, collection_id)
-	VALUES %s`, s.embeddingTableName, strings.Join(batchedValues, ","))
+	sql := fmt.Sprintf(`INSERT INTO %s (`+"`uuid`"+`, document, embedding, cmetadata, collection_id)
+	VALUES %s`, s.embeddingTableName, strings.Join(valueStrings, ","))
+	// fmt.Println("DUSTIN:", sql)
+	// fmt.Println("DUSTIN:", valueStrings)
+	// fmt.Println("DUSTIN:", valueArgs)
+	// stmt := fmt.Sprintf("INSERT INTO users (name, age) VALUES %s", strings.Join(valueStrings, ","))
 
-	_, err = s.db.ExecContext(ctx, sql)
+	// sql := fmt.Sprintf(`INSERT INTO %s (`+"`uuid`"+`, document, embedding, cmetadata, collection_id)
+	// VALUES `, s.embeddingTableName)
+	// // batchedValues := make([]string, 0, len(docs))
+	// ids := make([]string, len(docs))
+	// for docIdx, doc := range docs {
+	// 	id := uuid.New().String()
+	// 	ids[docIdx] = id
+	// 	jsonEmbedding, err := json.Marshal(vectors[docIdx])
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	jsonMetadata, err := json.Marshal(doc.Metadata)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	sql += fmt.Sprintf("('%s', '%s', '%s', '%s', '%s')", id, doc.PageContent, jsonEmbedding, jsonMetadata, s.databaseUUID)
+	// 	if docIdx < len(docs)-1 {
+	// 		sql += ","
+	// 	}
+	// 	// batchedValues = append(batchedValues, fmt.Sprintf("(%s, %s, %s, %s, %s)", id, doc.PageContent, jsonEmbedding, jsonMetadata, s.databaseUUID))
+	// }
+
+	// // sql := fmt.Sprintf(`INSERT INTO %s (`+"`uuid`"+`, document, embedding, cmetadata, collection_id)
+	// // VALUES %s`, s.embeddingTableName, strings.Join(batchedValues, ","))
+	// fmt.Println("DUSTIN:", sql)
+
+	_, err = s.db.ExecContext(ctx, sql, valueArgs...)
 	if err != nil {
 		return nil, err
 	}
 
 	if s.createEmbeddingIndexAfterAddDocuments {
-		sql = fmt.Sprintf(`CREATE VECTOR INDEX IF NOT EXISTS %s_embedding_idx ON %s (embedding)`, s.embeddingTableName, s.embeddingTableName)
-		_, err = s.db.ExecContext(ctx, sql)
-		if err != nil {
+		sql = fmt.Sprintf(`SET @index_name = '%s_embedding_idx';
+SET @table_name = '%s';
+
+SELECT COUNT(*)
+INTO @index_exists
+FROM information_schema.statistics
+WHERE table_schema = DATABASE()
+	AND table_name = @table_name
+	AND index_name = @index_name;
+
+SET @sql = IF(@index_exists = 0, CONCAT('CREATE VECTOR INDEX ', @index_name, ' ON ', @table_name, ' (embedding)'), 'SELECT ''Index already exists''');
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;`, s.embeddingTableName, s.embeddingTableName)
+		if _, err := s.db.ExecContext(ctx, sql); err != nil {
 			return nil, err
 		}
 	}
@@ -373,7 +446,7 @@ func (s Store) Search(
 FROM %s
 JOIN %s ON %s.collection_id=%s.uuid
 WHERE %s.name='%s' AND %s
-LIMIT $1`, s.embeddingTableName, s.embeddingTableName, s.embeddingTableName,
+LIMIT ?`, s.embeddingTableName, s.embeddingTableName, s.embeddingTableName,
 		s.collectionTableName, s.embeddingTableName, s.collectionTableName, s.collectionTableName, databaseName,
 		whereQuery)
 	rows, err := s.db.QueryContext(ctx, sql, numDocuments)
@@ -404,18 +477,21 @@ func (s Store) DropTables(ctx context.Context) error {
 }
 
 func (s Store) RemoveDatabase(ctx context.Context, tx *sql.Tx) error {
-	_, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE name = $1`, s.collectionTableName), s.databaseName)
+	_, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE name = ?`, s.collectionTableName), s.databaseName)
 	return err
 }
 
 func (s *Store) createOrGetDatabase(ctx context.Context, tx *sql.Tx) error {
-	sql := fmt.Sprintf(`INSERT INTO %s (uuid, name, cmetadata)
-		VALUES($1, $2, $3) ON CONFLICT (name) DO
-		UPDATE SET cmetadata = $3`, s.collectionTableName)
-	if _, err := tx.ExecContext(ctx, sql, uuid.New().String(), s.databaseName, s.databaseMetadata); err != nil {
+	jsonMetadata, err := json.Marshal(s.databaseMetadata)
+	if err != nil {
 		return err
 	}
-	sql = fmt.Sprintf(`SELECT uuid FROM %s WHERE name = $1 ORDER BY name limit 1`, s.collectionTableName)
+	sql := fmt.Sprintf(`INSERT INTO %s (`+"`uuid`"+`, name, cmetadata)
+		VALUES(?, ?, ?) ON DUPLICATE KEY UPDATE cmetadata = ?`, s.collectionTableName)
+	if _, err := tx.ExecContext(ctx, sql, uuid.New().String(), s.databaseName, jsonMetadata, jsonMetadata); err != nil {
+		return err
+	}
+	sql = fmt.Sprintf(`SELECT `+"`uuid`"+` FROM %s WHERE name = ? ORDER BY name limit 1`, s.collectionTableName)
 	return tx.QueryRowContext(ctx, sql, s.databaseName).Scan(&s.databaseUUID)
 }
 
