@@ -125,10 +125,11 @@ func (s Store) createCollectionTableIfNotExists(ctx context.Context, tx *sql.Tx)
 	return nil
 }
 
+// todo: put embedding json, back
 func (s Store) createEmbeddingTableIfNotExists(ctx context.Context, tx *sql.Tx) error {
 	sql := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
 	collection_id varchar(36),
-	embedding json,
+	embedding VECTOR(1536) NOT NULL,
 	document longtext,
 	cmetadata json,
 	`+"`uuid`"+` varchar(36) NOT NULL,
@@ -160,20 +161,20 @@ DEALLOCATE PREPARE stmt;`, s.embeddingTableName, s.embeddingTableName)
 
 	if !s.createEmbeddingIndexAfterAddDocuments {
 		sql = fmt.Sprintf(`SET @index_name = '%s_embedding_idx';
-SET @table_name = '%s';
-
-SELECT COUNT(*)
-INTO @index_exists
-FROM information_schema.statistics
-WHERE table_schema = DATABASE()
-	AND table_name = @table_name
-	AND index_name = @index_name;
-
-SET @sql = IF(@index_exists = 0, CONCAT('CREATE VECTOR INDEX ', @index_name, ' ON ', @table_name, ' (embedding)'), 'SELECT ''Index already exists''');
-
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;`, s.embeddingTableName, s.embeddingTableName)
+	SET @table_name = '%s';
+	
+	SELECT COUNT(*)
+	INTO @index_exists
+	FROM information_schema.statistics
+	WHERE table_schema = DATABASE()
+		AND table_name = @table_name
+		AND index_name = @index_name;
+	
+	SET @sql = IF(@index_exists = 0, CONCAT('CREATE VECTOR INDEX ', @index_name, ' ON ', @table_name, ' (embedding)'), 'SELECT ''Index already exists''');
+	
+	PREPARE stmt FROM @sql;
+	EXECUTE stmt;
+	DEALLOCATE PREPARE stmt;`, s.embeddingTableName, s.embeddingTableName)
 		if _, err := tx.ExecContext(ctx, sql); err != nil {
 			return err
 		}
@@ -215,33 +216,41 @@ func (s Store) AddDocuments(
 	}
 
 	ids := make([]string, len(docs))
-	valueStrings := make([]string, 0, len(docs))
-	valueArgs := make([]interface{}, 0, len(docs)*2)
+	// valueStrings := make([]string, 0, len(docs))
+	//valueArgs := make([]interface{}, 0, len(docs)*2)
 	for docIdx, doc := range docs {
 		id := uuid.New().String()
 		ids[docIdx] = id
-		valueStrings = append(valueStrings, "(?, ?, ?, ?, ?)")
+		//valueStrings = append(valueStrings, "(?, ?, ?, ?, ?)")
+		//vector := vectors[docIdx]
+		//fmt.Println("DUSTIN: vector size:", len(vector))
 		jsonEmbedding, err := json.Marshal(vectors[docIdx])
 		if err != nil {
 			return nil, err
 		}
+		//fmt.Println("DUSTIN: jsonEmbedding size:", len(jsonEmbedding))
 		jsonMetadata, err := json.Marshal(doc.Metadata)
 		if err != nil {
 			return nil, err
 		}
-		valueArgs = append(valueArgs, id, doc.PageContent, jsonEmbedding, jsonMetadata, s.databaseUUID)
+		//valueArgs = append(valueArgs, id, doc.PageContent, jsonEmbedding, jsonMetadata, s.databaseUUID)
+		sql := fmt.Sprintf(`INSERT INTO %s (`+"`uuid`"+`, document, embedding, cmetadata, collection_id) VALUES (?, ?, VEC_FromText(?), ?, ?)`, s.embeddingTableName)
+		_, err = s.db.ExecContext(ctx, sql, id, doc.PageContent, jsonEmbedding, jsonMetadata, s.databaseUUID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	sql := fmt.Sprintf(`INSERT INTO %s (`+"`uuid`"+`, document, embedding, cmetadata, collection_id)
-	VALUES %s`, s.embeddingTableName, strings.Join(valueStrings, ","))
+	// sql := fmt.Sprintf(`INSERT INTO %s (`+"`uuid`"+`, document, embedding, cmetadata, collection_id)
+	// VALUES %s`, s.embeddingTableName, strings.Join(valueStrings, ","))
 
-	_, err = s.db.ExecContext(ctx, sql, valueArgs...)
-	if err != nil {
-		return nil, err
-	}
+	//_, err = s.db.ExecContext(ctx, sql, valueArgs...)
+	//if err != nil {
+	//	return nil, err
+	//}
 
 	if s.createEmbeddingIndexAfterAddDocuments {
-		sql = fmt.Sprintf(`SET @index_name = '%s_embedding_idx';
+		sql := fmt.Sprintf(`SET @index_name = '%s_embedding_idx';
 	SET @table_name = '%s';
 
 	SELECT COUNT(*)
@@ -264,6 +273,8 @@ func (s Store) AddDocuments(
 	return ids, nil
 }
 
+// todo: put VEC_DISTANCE(f.embedding, ?) AS distance back
+//
 //nolint:cyclop
 func (s Store) SimilaritySearch(
 	ctx context.Context,
@@ -301,7 +312,7 @@ func (s Store) SimilaritySearch(
 		whereQuery = "TRUE"
 	}
 
-	dims := len(embedderData)
+	//dims := len(embedderData)
 
 	jsonEmbedding, err := json.Marshal(embedderData)
 	if err != nil {
@@ -313,8 +324,6 @@ func (s Store) SimilaritySearch(
         *
     FROM
         %s
-    WHERE
-        JSON_LENGTH(embedding) = ?
 )
 SELECT
     data.document,
@@ -324,7 +333,7 @@ FROM
 (
     SELECT
         f.*,
-        VEC_DISTANCE(f.embedding, ?) AS distance
+        VEC_DISTANCE_EUCLIDEAN(f.embedding, Vec_FromText(?)) AS distance
     FROM
         filtered_embedding_dims AS f
         JOIN %s AS t ON f.collection_id = t.uuid
@@ -334,13 +343,56 @@ FROM
 WHERE %s
 ORDER BY
     data.distance
-LIMIT	
+LIMIT
     ?;`, s.embeddingTableName,
 		s.collectionTableName,
 		databaseName,
 		whereQuery)
 
-	rows, err := s.db.QueryContext(ctx, sql, dims, jsonEmbedding, numDocuments)
+	//	sql := fmt.Sprintf(`WITH filtered_embedding_dims AS (
+	//    SELECT
+	//        *
+	//    FROM
+	//        %s
+	//    WHERE
+	//        JSON_LENGTH(embedding) = ?
+	//)
+	//SELECT
+	//    data.document,
+	//    data.cmetadata,
+	//    (1 - data.distance) AS score
+	//FROM
+	//(
+	//    SELECT
+	//        f.*,
+	//        VEC_DISTANCE(f.embedding, ?) AS distance
+	//    FROM
+	//        filtered_embedding_dims AS f
+	//        JOIN %s AS t ON f.collection_id = t.uuid
+	//    WHERE
+	//        t.name = '%s'
+	//) AS data
+	//WHERE %s
+	//ORDER BY
+	//    data.distance
+	//LIMIT
+	//    ?;`, s.embeddingTableName,
+	//		s.collectionTableName,
+	//		databaseName,
+	//		whereQuery)
+
+	//fmt.Println("DUSTIN: jsonEmbedding", jsonEmbedding)
+	err = s.printEmbeddingRowsOfSameLength(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.printData(ctx, databaseName, jsonEmbedding)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.QueryContext(ctx, sql, jsonEmbedding, numDocuments)
 	if err != nil {
 		return nil, err
 	}
@@ -368,6 +420,76 @@ LIMIT
 		})
 	}
 	return docs, rows.Err()
+}
+
+func (s *Store) printEmbeddingRowsOfSameLength(ctx context.Context) error {
+	sql := fmt.Sprintf("SELECT * FROM %s;", s.embeddingTableName)
+	rows, err := s.db.QueryContext(ctx, sql)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	//docs := make([]schema.Document, 0)
+	for rows.Next() {
+		var collectionID string
+		var embedding string
+		var document string
+		var cmetadata string
+		var uuidStr string
+		if err := rows.Scan(&collectionID, &embedding, &document, &cmetadata, &uuidStr); err != nil {
+			return err
+		}
+
+		fmt.Printf("DUSTIN: printEmbeddingRowsOfSameLength: %s, %s, %s\n", uuidStr, collectionID, document)
+	}
+	return rows.Err()
+}
+
+func (s *Store) printData(ctx context.Context, databaseName string, jsonEmbedding []byte) error {
+	sql := fmt.Sprintf(`WITH filtered_embedding_dims AS (
+    SELECT
+        *
+    FROM
+        %s
+)
+SELECT
+    data.document,
+    data.cmetadata,
+    (1 - data.distance) AS score
+FROM
+(
+    SELECT
+        f.*,
+        VEC_DISTANCE_EUCLIDEAN(f.embedding, Vec_FromText(?)) AS distance
+    FROM
+        filtered_embedding_dims AS f
+        JOIN %s AS t ON f.collection_id = t.uuid
+    WHERE
+        t.name = '%s'
+) AS data`, s.embeddingTableName, s.collectionTableName, databaseName)
+
+	rows, err := s.db.QueryContext(ctx, sql, jsonEmbedding)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	//docs := make([]schema.Document, 0)
+	for rows.Next() {
+		//var collectionID string
+		//var embedding string
+		var document string
+		var cmetadata string
+		var score float64
+		//var uuidStr string
+		if err := rows.Scan(&document, &cmetadata, &score); err != nil {
+			return err
+		}
+
+		fmt.Printf("DUSTIN: printData: %s, %s, %f\n", document, cmetadata, score)
+	}
+	return rows.Err()
 }
 
 //nolint:cyclop
