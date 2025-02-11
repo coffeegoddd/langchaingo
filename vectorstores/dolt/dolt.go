@@ -114,7 +114,7 @@ func (s *Store) init(ctx context.Context) error {
 
 func (s Store) createCollectionTableIfNotExists(ctx context.Context, tx *sql.Tx) error {
 	sql := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
-	name varchar(2048),
+	name varchar(720),
 	cmetadata json,
 	`+"`uuid`"+` varchar(36) NOT NULL,
 	UNIQUE (name),
@@ -234,36 +234,6 @@ func (s Store) AddDocuments(
 
 	sql := fmt.Sprintf(`INSERT INTO %s (`+"`uuid`"+`, document, embedding, cmetadata, collection_id)
 	VALUES %s`, s.embeddingTableName, strings.Join(valueStrings, ","))
-	// fmt.Println("DUSTIN:", sql)
-	// fmt.Println("DUSTIN:", valueStrings)
-	// fmt.Println("DUSTIN:", valueArgs)
-	// stmt := fmt.Sprintf("INSERT INTO users (name, age) VALUES %s", strings.Join(valueStrings, ","))
-
-	// sql := fmt.Sprintf(`INSERT INTO %s (`+"`uuid`"+`, document, embedding, cmetadata, collection_id)
-	// VALUES `, s.embeddingTableName)
-	// // batchedValues := make([]string, 0, len(docs))
-	// ids := make([]string, len(docs))
-	// for docIdx, doc := range docs {
-	// 	id := uuid.New().String()
-	// 	ids[docIdx] = id
-	// 	jsonEmbedding, err := json.Marshal(vectors[docIdx])
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// 	jsonMetadata, err := json.Marshal(doc.Metadata)
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// 	sql += fmt.Sprintf("('%s', '%s', '%s', '%s', '%s')", id, doc.PageContent, jsonEmbedding, jsonMetadata, s.databaseUUID)
-	// 	if docIdx < len(docs)-1 {
-	// 		sql += ","
-	// 	}
-	// 	// batchedValues = append(batchedValues, fmt.Sprintf("(%s, %s, %s, %s, %s)", id, doc.PageContent, jsonEmbedding, jsonMetadata, s.databaseUUID))
-	// }
-
-	// // sql := fmt.Sprintf(`INSERT INTO %s (`+"`uuid`"+`, document, embedding, cmetadata, collection_id)
-	// // VALUES %s`, s.embeddingTableName, strings.Join(batchedValues, ","))
-	// fmt.Println("DUSTIN:", sql)
 
 	_, err = s.db.ExecContext(ctx, sql, valueArgs...)
 	if err != nil {
@@ -272,20 +242,20 @@ func (s Store) AddDocuments(
 
 	if s.createEmbeddingIndexAfterAddDocuments {
 		sql = fmt.Sprintf(`SET @index_name = '%s_embedding_idx';
-SET @table_name = '%s';
+	SET @table_name = '%s';
 
-SELECT COUNT(*)
-INTO @index_exists
-FROM information_schema.statistics
-WHERE table_schema = DATABASE()
-	AND table_name = @table_name
-	AND index_name = @index_name;
+	SELECT COUNT(*)
+	INTO @index_exists
+	FROM information_schema.statistics
+	WHERE table_schema = DATABASE()
+		AND table_name = @table_name
+		AND index_name = @index_name;
 
-SET @sql = IF(@index_exists = 0, CONCAT('CREATE VECTOR INDEX ', @index_name, ' ON ', @table_name, ' (embedding)'), 'SELECT ''Index already exists''');
+	SET @sql = IF(@index_exists = 0, CONCAT('CREATE VECTOR INDEX ', @index_name, ' ON ', @table_name, ' (embedding)'), 'SELECT ''Index already exists''');
 
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;`, s.embeddingTableName, s.embeddingTableName)
+	PREPARE stmt FROM @sql;
+	EXECUTE stmt;
+	DEALLOCATE PREPARE stmt;`, s.embeddingTableName, s.embeddingTableName)
 		if _, err := s.db.ExecContext(ctx, sql); err != nil {
 			return nil, err
 		}
@@ -330,51 +300,21 @@ func (s Store) SimilaritySearch(
 	if len(whereQuery) == 0 {
 		whereQuery = "TRUE"
 	}
-	dims := len(embedderData)
 
-	// 	// this is pg original query
-	// 	sql := fmt.Sprintf(`WITH filtered_embedding_dims AS MATERIALIZED (
-	//     SELECT
-	//         *
-	//     FROM
-	//         %s
-	//     WHERE
-	//         vector_dims (
-	//                 embedding
-	//         ) = $1
-	// )
-	// SELECT
-	// 	data.document,
-	// 	data.cmetadata,
-	// 	(1 - data.distance) AS score
-	// FROM (
-	// 	SELECT
-	// 		filtered_embedding_dims.*,
-	// 		embedding <=> $2 AS distance
-	// 	FROM
-	// 		filtered_embedding_dims
-	// 		JOIN %s ON filtered_embedding_dims.collection_id=%s.uuid WHERE %s.name='%s') AS data
-	// WHERE %s
-	// ORDER BY
-	// 	data.distance
-	// LIMIT $3`, s.embeddingTableName,
-	// 		s.collectionTableName, s.collectionTableName, s.collectionTableName, databaseName,
-	// 		whereQuery)
+	dims := len(embedderData)
 
 	jsonEmbedding, err := json.Marshal(embedderData)
 	if err != nil {
 		return nil, err
 	}
 
-	// example dolt vec_distance query
-	// SELECT id, content FROM dolthub_blog_embeddings ORDER BY vec_distance(embedding, ?) LIMIT 10
 	sql := fmt.Sprintf(`WITH filtered_embedding_dims AS (
     SELECT
         *
     FROM
         %s
     WHERE
-        JSON_LENGTH(embedding) = %d
+        JSON_LENGTH(embedding) = ?
 )
 SELECT
     data.document,
@@ -384,24 +324,21 @@ FROM
 (
     SELECT
         f.*,
-        VEC_DISTANCE(f.embedding, %s) AS distance
+        VEC_DISTANCE(f.embedding, ?) AS distance
     FROM
         filtered_embedding_dims AS f
         JOIN %s AS t ON f.collection_id = t.uuid
     WHERE
         t.name = '%s'
 ) AS data
-WHERE '%s'
+WHERE %s
 ORDER BY
     data.distance
 LIMIT	
-    %d;`, s.embeddingTableName,
-		len(embedderData),
-		jsonEmbedding,
+    ?;`, s.embeddingTableName,
 		s.collectionTableName,
 		databaseName,
-		whereQuery,
-		numDocuments)
+		whereQuery)
 
 	rows, err := s.db.QueryContext(ctx, sql, dims, jsonEmbedding, numDocuments)
 	if err != nil {
@@ -411,11 +348,24 @@ LIMIT
 
 	docs := make([]schema.Document, 0)
 	for rows.Next() {
-		doc := schema.Document{}
-		if err := rows.Scan(&doc.PageContent, &doc.Metadata, &doc.Score); err != nil {
+		var content string
+		var metadata string
+		var score float64
+
+		if err := rows.Scan(&content, &metadata, &score); err != nil {
 			return nil, err
 		}
-		docs = append(docs, doc)
+
+		var metadataMap map[string]any
+		if err := json.Unmarshal([]byte(metadata), &metadataMap); err != nil {
+			return nil, err
+		}
+
+		docs = append(docs, schema.Document{
+			PageContent: content,
+			Metadata:    metadataMap,
+			Score:       float32(score),
+		})
 	}
 	return docs, rows.Err()
 }
