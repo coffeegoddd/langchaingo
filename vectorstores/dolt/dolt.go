@@ -25,7 +25,7 @@ var (
 	ErrUnsupportedOptions         = errors.New("unsupported options")
 )
 
-// DB represents both a sql.DB and sql.Tx // todo: is this right?
+// DB represents both a sql.DB and sql.Tx
 type DB interface {
 	PingContext(ctx context.Context) error
 	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error)
@@ -340,6 +340,16 @@ LIMIT
 		databaseName,
 		whereQuery)
 
+	err = s.printEmbeddingRowsOfSameLength(ctx, dims)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.printData(ctx, databaseName, dims, jsonEmbedding)
+	if err != nil {
+		return nil, err
+	}
+
 	rows, err := s.db.QueryContext(ctx, sql, dims, jsonEmbedding, numDocuments)
 	if err != nil {
 		return nil, err
@@ -368,6 +378,78 @@ LIMIT
 		})
 	}
 	return docs, rows.Err()
+}
+
+func (s *Store) printEmbeddingRowsOfSameLength(ctx context.Context, dims int) error {
+	sql := fmt.Sprintf("SELECT * FROM %s WHERE JSON_LENGTH(embedding) = ?", s.embeddingTableName)
+	rows, err := s.db.QueryContext(ctx, sql, dims)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	//docs := make([]schema.Document, 0)
+	for rows.Next() {
+		var collectionID string
+		var embedding string
+		var document string
+		var cmetadata string
+		var uuidStr string
+		if err := rows.Scan(&collectionID, &embedding, &document, &cmetadata, &uuidStr); err != nil {
+			return err
+		}
+
+		fmt.Printf("DUSTIN: printEmbeddingRowsOfSameLength: %s, %s, %s\n", uuidStr, collectionID, document)
+	}
+	return rows.Err()
+}
+
+func (s *Store) printData(ctx context.Context, databaseName string, dims int, jsonEmbedding []byte) error {
+	sql := fmt.Sprintf(`WITH filtered_embedding_dims AS (
+    SELECT
+        *
+    FROM
+        %s
+    WHERE
+        JSON_LENGTH(embedding) = ?
+)
+SELECT
+    data.document,
+    data.cmetadata,
+    (1 - data.distance) AS score
+FROM
+(
+    SELECT
+        f.*,
+        VEC_DISTANCE(f.embedding, ?) AS distance
+    FROM
+        filtered_embedding_dims AS f
+        JOIN %s AS t ON f.collection_id = t.uuid
+    WHERE
+        t.name = '%s'
+) AS data`, s.embeddingTableName, s.collectionTableName, databaseName)
+
+	rows, err := s.db.QueryContext(ctx, sql, jsonEmbedding, dims)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	//docs := make([]schema.Document, 0)
+	for rows.Next() {
+		//var collectionID string
+		//var embedding string
+		var document string
+		var cmetadata string
+		var score float64
+		//var uuidStr string
+		if err := rows.Scan(&document, &cmetadata, &score); err != nil {
+			return err
+		}
+
+		fmt.Printf("DUSTIN: printData: %s, %s, %f\n", document, cmetadata, score)
+	}
+	return rows.Err()
 }
 
 //nolint:cyclop

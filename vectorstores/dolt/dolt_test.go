@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/tmc/langchaingo/vectorstores"
 	"io"
 	"net"
 	"os"
@@ -91,6 +92,7 @@ func (di *testDoltServer) Start() error {
 	require.NoError(di.t, err)
 
 	di.CmdDir = tmpDir
+	fmt.Println("DUSTIN: dolt db:", di.CmdDir)
 
 	doltInit := exec.Command(mustGetDoltExec(di.t), "init")
 	doltInit.Env = os.Environ()
@@ -310,65 +312,65 @@ func TestDoltStoreRest(t *testing.T) {
 	require.Equal(t, "japan", docs[0].Metadata["country"])
 }
 
-// func TestPgvectorStoreRestWithScoreThreshold(t *testing.T) {
-// 	t.Parallel()
-// 	pgvectorURL := preCheckEnvSetting(t)
-// 	ctx := context.Background()
+func TestDoltStoreRestWithScoreThreshold(t *testing.T) {
+	t.Parallel()
+	doltURL := preCheckEnvSetting(t)
+	ctx := context.Background()
 
-// 	llm, err := openai.New(
-// 		openai.WithEmbeddingModel("text-embedding-ada-002"),
-// 	)
-// 	require.NoError(t, err)
-// 	e, err := embeddings.NewEmbedder(llm)
-// 	require.NoError(t, err)
+	llm, err := openai.New(
+		openai.WithEmbeddingModel("text-embedding-ada-002"),
+	)
+	require.NoError(t, err)
+	e, err := embeddings.NewEmbedder(llm)
+	require.NoError(t, err)
 
-// 	conn, err := pgx.Connect(ctx, pgvectorURL)
-// 	require.NoError(t, err)
+	db, err := sql.Open("mysql", doltURL)
+	require.NoError(t, err)
 
-// 	store, err := pgvector.New(
-// 		ctx,
-// 		pgvector.WithConn(conn),
-// 		pgvector.WithEmbedder(e),
-// 		pgvector.WithPreDeleteCollection(true),
-// 		pgvector.WithCollectionName(makeNewCollectionName()),
-// 	)
-// 	require.NoError(t, err)
+	store, err := dolt.New(
+		ctx,
+		dolt.WithDB(db),
+		dolt.WithEmbedder(e),
+		dolt.WithPreDeleteDatabase(true),
+		dolt.WithDatabaseName(makeNewDatabaseName()),
+	)
+	require.NoError(t, err)
 
-// 	defer cleanupTestArtifacts(ctx, t, store, pgvectorURL)
+	defer cleanupTestArtifacts(ctx, t, store, doltURL)
 
-// 	_, err = store.AddDocuments(context.Background(), []schema.Document{
-// 		{PageContent: "Tokyo"},
-// 		{PageContent: "Yokohama"},
-// 		{PageContent: "Osaka"},
-// 		{PageContent: "Nagoya"},
-// 		{PageContent: "Sapporo"},
-// 		{PageContent: "Fukuoka"},
-// 		{PageContent: "Dublin"},
-// 		{PageContent: "Paris"},
-// 		{PageContent: "London"},
-// 		{PageContent: "New York"},
-// 	})
-// 	require.NoError(t, err)
+	_, err = store.AddDocuments(context.Background(), []schema.Document{
+		{PageContent: "Tokyo"},
+		{PageContent: "Yokohama"},
+		{PageContent: "Osaka"},
+		{PageContent: "Nagoya"},
+		{PageContent: "Sapporo"},
+		{PageContent: "Fukuoka"},
+		{PageContent: "Dublin"},
+		{PageContent: "Paris"},
+		{PageContent: "London"},
+		{PageContent: "New York"},
+	})
+	require.NoError(t, err)
 
-// 	// test with a score threshold of 0.8, expected 6 documents
-// 	docs, err := store.SimilaritySearch(
-// 		ctx,
-// 		"Which of these are cities in Japan",
-// 		10,
-// 		vectorstores.WithScoreThreshold(0.8),
-// 	)
-// 	require.NoError(t, err)
-// 	require.Len(t, docs, 6)
+	// test with a score threshold of 0.8, expected 6 documents
+	docs, err := store.SimilaritySearch(
+		ctx,
+		"Which of these are cities in Japan",
+		10,
+		vectorstores.WithScoreThreshold(0.8),
+	)
+	require.NoError(t, err)
+	require.Len(t, docs, 6)
 
-// 	// test with a score threshold of 0, expected all 10 documents
-// 	docs, err = store.SimilaritySearch(
-// 		ctx,
-// 		"Which of these are cities in Japan",
-// 		10,
-// 		vectorstores.WithScoreThreshold(0))
-// 	require.NoError(t, err)
-// 	require.Len(t, docs, 10)
-// }
+	// test with a score threshold of 0, expected all 10 documents
+	docs, err = store.SimilaritySearch(
+		ctx,
+		"Which of these are cities in Japan",
+		10,
+		vectorstores.WithScoreThreshold(0))
+	require.NoError(t, err)
+	require.Len(t, docs, 10)
+}
 
 // func TestPgvectorStoreSimilarityScore(t *testing.T) {
 // 	t.Parallel()

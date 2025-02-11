@@ -2,6 +2,7 @@ package pgvector
 
 import (
 	"context"
+	dsql "database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -305,6 +306,22 @@ func (s Store) SimilaritySearch(
 		whereQuery = "TRUE"
 	}
 	dims := len(embedderData)
+
+	err = s.printEmbeddingRowsOfSameLength(ctx, dims)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.printData(ctx, collectionName, dims, pgvector.NewVector(embedderData))
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.printDataWithOrderBy(ctx, collectionName, whereQuery, dims, pgvector.NewVector(embedderData))
+	if err != nil {
+		return nil, err
+	}
+
 	sql := fmt.Sprintf(`WITH filtered_embedding_dims AS MATERIALIZED (
     SELECT
         *
@@ -347,6 +364,133 @@ LIMIT $3`, s.embeddingTableName,
 		docs = append(docs, doc)
 	}
 	return docs, rows.Err()
+}
+
+func (s *Store) printEmbeddingRowsOfSameLength(ctx context.Context, dims int) error {
+	sql := fmt.Sprintf(`SELECT
+        *
+    FROM
+        %s
+    WHERE
+        vector_dims (
+                embedding
+        ) = $1`, s.embeddingTableName)
+	rows, err := s.conn.Query(ctx, sql, dims)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	//docs := make([]schema.Document, 0)
+	for rows.Next() {
+		var collectionID string
+		var embedding string
+		var document string
+		cmetadata := dsql.NullString{}
+		var uuidStr string
+		if err := rows.Scan(&collectionID, &embedding, &document, &cmetadata, &uuidStr); err != nil {
+			return err
+		}
+
+		fmt.Printf("DUSTIN: printEmbeddingRowsOfSameLength: %s, %s\n", collectionID, document)
+	}
+	return rows.Err()
+}
+
+func (s *Store) printData(ctx context.Context, collectionName string, dims int, vec pgvector.Vector) error {
+	sql := fmt.Sprintf(`WITH filtered_embedding_dims AS MATERIALIZED (
+    SELECT
+        *
+    FROM
+        %s
+    WHERE
+        vector_dims (
+                embedding
+        ) = $1
+)
+SELECT
+	data.document,
+	data.cmetadata,
+	(1 - data.distance) AS score
+FROM (
+	SELECT
+		filtered_embedding_dims.*,
+		embedding <=> $2 AS distance
+	FROM
+		filtered_embedding_dims
+		JOIN %s ON filtered_embedding_dims.collection_id=%s.uuid WHERE %s.name='%s') AS data`,
+		s.embeddingTableName, s.collectionTableName, s.collectionTableName, s.collectionTableName, collectionName)
+
+	rows, err := s.conn.Query(ctx, sql, dims, vec)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	//docs := make([]schema.Document, 0)
+	for rows.Next() {
+		//var collectionID string
+		//var embedding string
+		var document string
+		cmetadata := dsql.NullString{}
+		var score float64
+		//var uuidStr string
+		if err := rows.Scan(&document, &cmetadata, &score); err != nil {
+			return err
+		}
+
+		fmt.Printf("DUSTIN: printData: %s, %s, %f\n", document, cmetadata.String, score)
+	}
+	return rows.Err()
+}
+
+func (s *Store) printDataWithOrderBy(ctx context.Context, collectionName, whereQuery string, dims int, vec pgvector.Vector) error {
+	sql := fmt.Sprintf(`WITH filtered_embedding_dims AS MATERIALIZED (
+    SELECT
+        *
+    FROM
+        %s
+    WHERE
+        vector_dims (
+                embedding
+        ) = $1
+)
+SELECT
+	data.document,
+	data.cmetadata,
+	(1 - data.distance) AS score
+FROM (
+	SELECT
+		filtered_embedding_dims.*,
+		embedding <=> $2 AS distance
+	FROM
+		filtered_embedding_dims
+		JOIN %s ON filtered_embedding_dims.collection_id=%s.uuid WHERE %s.name='%s') AS data WHERE %s
+ORDER BY
+	data.distance`,
+		s.embeddingTableName, s.collectionTableName, s.collectionTableName, s.collectionTableName, collectionName, whereQuery)
+
+	rows, err := s.conn.Query(ctx, sql, dims, vec)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	//docs := make([]schema.Document, 0)
+	for rows.Next() {
+		//var collectionID string
+		//var embedding string
+		var document string
+		cmetadata := dsql.NullString{}
+		var score float64
+		//var uuidStr string
+		if err := rows.Scan(&document, &cmetadata, &score); err != nil {
+			return err
+		}
+
+		fmt.Printf("DUSTIN: printDataWithOrderBy: %s, %s, %f\n", document, cmetadata.String, score)
+	}
+	return rows.Err()
 }
 
 //nolint:cyclop
