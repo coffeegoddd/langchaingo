@@ -333,7 +333,7 @@ FROM
 (
     SELECT
         f.*,
-        VEC_DISTANCE_EUCLIDEAN(f.embedding, Vec_FromText(?)) AS distance
+        VEC_DISTANCE_COSINE(f.embedding, Vec_FromText(?)) AS distance
     FROM
         filtered_embedding_dims AS f
         JOIN %s AS t ON f.collection_id = t.uuid
@@ -388,6 +388,11 @@ LIMIT
 	}
 
 	err = s.printData(ctx, databaseName, jsonEmbedding)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.printDataWithOrderBy(ctx, databaseName, whereQuery, jsonEmbedding)
 	if err != nil {
 		return nil, err
 	}
@@ -461,7 +466,7 @@ FROM
 (
     SELECT
         f.*,
-        VEC_DISTANCE_EUCLIDEAN(f.embedding, Vec_FromText(?)) AS distance
+        VEC_DISTANCE_COSINE(f.embedding, Vec_FromText(?)) AS distance
     FROM
         filtered_embedding_dims AS f
         JOIN %s AS t ON f.collection_id = t.uuid
@@ -488,6 +493,54 @@ FROM
 		}
 
 		fmt.Printf("DUSTIN: printData: %s, %s, %f\n", document, cmetadata, score)
+	}
+	return rows.Err()
+}
+
+func (s *Store) printDataWithOrderBy(ctx context.Context, databaseName, whereQuery string, jsonEmbedding []byte) error {
+	sql := fmt.Sprintf(`WITH filtered_embedding_dims AS (
+    SELECT
+        *
+    FROM
+        %s
+)
+SELECT
+    data.document,
+    data.cmetadata,
+    (1 - data.distance) AS score
+FROM
+(
+    SELECT
+        f.*,
+        VEC_DISTANCE_COSINE(f.embedding, Vec_FromText(?)) AS distance
+    FROM
+        filtered_embedding_dims AS f
+        JOIN %s AS t ON f.collection_id = t.uuid
+    WHERE
+        t.name = '%s'
+) AS data WHERE %s
+ORDER BY
+    data.distance`, s.embeddingTableName, s.collectionTableName, databaseName, whereQuery)
+
+	rows, err := s.db.QueryContext(ctx, sql, jsonEmbedding)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	//docs := make([]schema.Document, 0)
+	for rows.Next() {
+		//var collectionID string
+		//var embedding string
+		var document string
+		var cmetadata string
+		var score float64
+		//var uuidStr string
+		if err := rows.Scan(&document, &cmetadata, &score); err != nil {
+			return err
+		}
+
+		fmt.Printf("DUSTIN: printDataWithOrderBy: %s, %s, %f\n", document, cmetadata, score)
 	}
 	return rows.Err()
 }
