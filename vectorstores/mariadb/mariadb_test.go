@@ -40,7 +40,7 @@ func preCheckEnvSetting(t *testing.T) string {
 			tcmariadb.WithUsername("user"),
 			tcmariadb.WithPassword("passw0rd!"),
 			testcontainers.WithWaitStrategy(
-				wait.ForLog("database system is ready to accept connections").
+				wait.ForLog("ready for connections").
 					WithOccurrence(2).
 					WithStartupTimeout(30*time.Second)),
 		)
@@ -52,7 +52,7 @@ func preCheckEnvSetting(t *testing.T) string {
 			require.NoError(t, mariadbContainer.Terminate(context.Background()))
 		})
 
-		str, err := mariadbContainer.ConnectionString(context.Background(), "sslmode=disable")
+		str, err := mariadbContainer.ConnectionString(context.Background())
 		require.NoError(t, err)
 
 		mariadbURL = str
@@ -98,6 +98,7 @@ func TestMariaDBStoreRest(t *testing.T) {
 		ctx,
 		mariadb.WithDB(db),
 		mariadb.WithEmbedder(e),
+		mariadb.WithVectorDimensions(1536),
 		mariadb.WithPreDeleteDatabase(true),
 		mariadb.WithDatabaseName(makeNewCollectionName()),
 	)
@@ -139,6 +140,7 @@ func TestMariaDBStoreRestWithScoreThreshold(t *testing.T) {
 		ctx,
 		mariadb.WithDB(db),
 		mariadb.WithEmbedder(e),
+		mariadb.WithVectorDimensions(1536),
 		mariadb.WithPreDeleteDatabase(true),
 		mariadb.WithDatabaseName(makeNewCollectionName()),
 	)
@@ -199,6 +201,7 @@ func TestMariaDBStoreSimilarityScore(t *testing.T) {
 		ctx,
 		mariadb.WithDB(db),
 		mariadb.WithEmbedder(e),
+		mariadb.WithVectorDimensions(1536),
 		mariadb.WithPreDeleteDatabase(true),
 		mariadb.WithDatabaseName(makeNewCollectionName()),
 	)
@@ -244,6 +247,7 @@ func TestSimilaritySearchWithInvalidScoreThreshold(t *testing.T) {
 		ctx,
 		mariadb.WithDB(db),
 		mariadb.WithEmbedder(e),
+		mariadb.WithVectorDimensions(1536),
 		mariadb.WithPreDeleteDatabase(true),
 		mariadb.WithDatabaseName(makeNewCollectionName()),
 	)
@@ -331,6 +335,7 @@ func TestSimilaritySearchWithDifferentDimensions(t *testing.T) {
 		ctx,
 		mariadb.WithDB(db),
 		mariadb.WithEmbedder(e),
+		mariadb.WithVectorDimensions(1536),
 		mariadb.WithPreDeleteDatabase(false),
 		mariadb.WithDatabaseName(collectionName),
 	)
@@ -380,6 +385,7 @@ func TestMariaDBAsRetriever(t *testing.T) {
 		ctx,
 		mariadb.WithDB(db),
 		mariadb.WithEmbedder(e),
+		mariadb.WithVectorDimensions(1536),
 		mariadb.WithPreDeleteDatabase(true),
 		mariadb.WithDatabaseName(makeNewCollectionName()),
 	)
@@ -428,6 +434,7 @@ func TestMariaDBAsRetrieverWithScoreThreshold(t *testing.T) {
 		ctx,
 		mariadb.WithDB(db),
 		mariadb.WithEmbedder(e),
+		mariadb.WithVectorDimensions(1536),
 		mariadb.WithPreDeleteDatabase(true),
 		mariadb.WithDatabaseName(makeNewCollectionName()),
 	)
@@ -481,6 +488,7 @@ func TestMariaDBAsRetrieverWithMetadataFilterNotSelected(t *testing.T) {
 		ctx,
 		mariadb.WithDB(db),
 		mariadb.WithEmbedder(e),
+		mariadb.WithVectorDimensions(1536),
 		mariadb.WithPreDeleteDatabase(true),
 		mariadb.WithDatabaseName(makeNewCollectionName()),
 	)
@@ -562,6 +570,7 @@ func TestMariaDBAsRetrieverWithMetadataFilters(t *testing.T) {
 		ctx,
 		mariadb.WithDB(db),
 		mariadb.WithEmbedder(e),
+		mariadb.WithVectorDimensions(1536),
 		mariadb.WithPreDeleteDatabase(true),
 		mariadb.WithDatabaseName(makeNewCollectionName()),
 	)
@@ -633,6 +642,7 @@ func TestDeduplicater(t *testing.T) {
 		ctx,
 		mariadb.WithDB(db),
 		mariadb.WithEmbedder(e),
+		mariadb.WithVectorDimensions(1536),
 		mariadb.WithPreDeleteDatabase(true),
 		mariadb.WithDatabaseName(makeNewCollectionName()),
 	)
@@ -689,7 +699,6 @@ func TestWithAllOptions(t *testing.T) {
 			"key": "value",
 		}),
 		mariadb.WithVectorDimensions(1536),
-		mariadb.WithCreateEmbeddingIndexAfterAddDocuments(true),
 	)
 	require.NoError(t, err)
 
@@ -721,7 +730,6 @@ func TestWithAllOptions(t *testing.T) {
 			"key": "value",
 		}),
 		mariadb.WithVectorDimensions(1536),
-		mariadb.WithCreateEmbeddingIndexAfterAddDocuments(true),
 	)
 	require.NoError(t, err)
 

@@ -55,7 +55,7 @@ func WithCollectionTableName(name string) Option {
 	}
 }
 
-// WithConnectionURL is an option for specifying the Postgres connection URL. Either this
+// WithConnectionURL is an option for specifying the MariaDB connection URL. Either this
 // or WithConn must be used.
 func WithConnectionURL(connectionURL string) Option {
 	return func(p *Store) {
@@ -63,7 +63,7 @@ func WithConnectionURL(connectionURL string) Option {
 	}
 }
 
-// WithDB is an option for specifying the Dolt connection.
+// WithDB is an option for specifying the MariaDB connection.
 func WithDB(db DB) Option {
 	return func(p *Store) {
 		p.db = db
@@ -81,13 +81,6 @@ func WithDatabaseMetadata(metadata map[string]any) Option {
 func WithVectorDimensions(size int) Option {
 	return func(p *Store) {
 		p.vectorDimensions = size
-	}
-}
-
-// WithCreateEmbeddingIndexAfterAddDocuments is an option for specifying if the embedding index should be created after adding documents.
-func WithCreateEmbeddingIndexAfterAddDocuments(createEmbeddingIndexAfterAddDocuments bool) Option {
-	return func(p *Store) {
-		p.createEmbeddingIndexAfterAddDocuments = createEmbeddingIndexAfterAddDocuments
 	}
 }
 

@@ -40,17 +40,16 @@ type CloseNoErr interface {
 
 // Store is a wrapper around the mariadb client.
 type Store struct {
-	embedder                              embeddings.Embedder
-	connURL                               string
-	db                                    DB
-	embeddingTableName                    string
-	collectionTableName                   string
-	databaseName                          string
-	databaseUUID                          string
-	databaseMetadata                      map[string]any
-	preDeleteDatabase                     bool
-	vectorDimensions                      int
-	createEmbeddingIndexAfterAddDocuments bool
+	embedder            embeddings.Embedder
+	connURL             string
+	db                  DB
+	embeddingTableName  string
+	collectionTableName string
+	databaseName        string
+	databaseUUID        string
+	databaseMetadata    map[string]any
+	preDeleteDatabase   bool
+	vectorDimensions    int
 }
 
 var _ vectorstores.VectorStore = Store{}
@@ -126,61 +125,22 @@ func (s Store) createCollectionTableIfNotExists(ctx context.Context, tx *sql.Tx)
 }
 
 func (s Store) createEmbeddingTableIfNotExists(ctx context.Context, tx *sql.Tx) error {
-	embeddingStr := "embedding VECTOR NOT NULL,"
-	if s.vectorDimensions != 0 {
-		embeddingStr = fmt.Sprintf("embedding VECTOR(%d) NOT NULL,", s.vectorDimensions)
+	if s.vectorDimensions == 0 {
+		return fmt.Errorf("vector dimensions must be greater than zero")
 	}
 	sql := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
 	collection_id varchar(36),
-	`+embeddingStr+`
+	embedding VECTOR(%d) NOT NULL,
 	document longtext,
 	cmetadata json,
 	`+"`uuid`"+` varchar(36) NOT NULL,
+	INDEX langchain_mariadb_embedding_collection_id (collection_id),
+    VECTOR INDEX langchain_mariadb_embedding_embedding (embedding) M=8 DISTANCE=cosine,
 	CONSTRAINT langchain_mariadb_embedding_collection_id_fkey
 	FOREIGN KEY (collection_id) REFERENCES %s (uuid) ON DELETE CASCADE,
-	PRIMARY KEY (uuid))`, s.embeddingTableName, s.collectionTableName)
+	PRIMARY KEY (uuid))`, s.embeddingTableName, s.vectorDimensions, s.collectionTableName)
 	if _, err := tx.ExecContext(ctx, sql); err != nil {
 		return err
-	}
-
-	sql = fmt.Sprintf(`SET @index_name = '%s_collection_id';
-SET @table_name = '%s';
-
-SELECT COUNT(*)
-INTO @index_exists
-FROM information_schema.statistics
-WHERE table_schema = DATABASE()
-  AND table_name = @table_name
-  AND index_name = @index_name;
-
-SET @sql = IF(@index_exists = 0, CONCAT('CREATE INDEX ', @index_name, ' ON ', @table_name, ' (collection_id)'), 'SELECT ''Index already exists''');
-
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;`, s.embeddingTableName, s.embeddingTableName)
-	if _, err := tx.ExecContext(ctx, sql); err != nil {
-		return err
-	}
-
-	if !s.createEmbeddingIndexAfterAddDocuments {
-		sql = fmt.Sprintf(`SET @index_name = '%s_embedding_idx';
-	SET @table_name = '%s';
-	
-	SELECT COUNT(*)
-	INTO @index_exists
-	FROM information_schema.statistics
-	WHERE table_schema = DATABASE()
-		AND table_name = @table_name
-		AND index_name = @index_name;
-	
-	SET @sql = IF(@index_exists = 0, CONCAT('CREATE VECTOR INDEX M=8 DISTANCE=cosine', @index_name, ' ON ', @table_name, ' (embedding)'), 'SELECT ''Index already exists''');
-	
-	PREPARE stmt FROM @sql;
-	EXECUTE stmt;
-	DEALLOCATE PREPARE stmt;`, s.embeddingTableName, s.embeddingTableName)
-		if _, err := tx.ExecContext(ctx, sql); err != nil {
-			return err
-		}
 	}
 
 	return nil
@@ -224,7 +184,7 @@ func (s Store) AddDocuments(
 	for docIdx, doc := range docs {
 		id := uuid.New().String()
 		ids[docIdx] = id
-		valueStrings = append(valueStrings, "(?, ?, ?, ?, ?)")
+		valueStrings = append(valueStrings, "(?, ?, Vec_FromText(?), ?, ?)")
 		jsonEmbedding, err := json.Marshal(vectors[docIdx])
 		if err != nil {
 			return nil, err
@@ -242,27 +202,6 @@ func (s Store) AddDocuments(
 	_, err = s.db.ExecContext(ctx, sql, valueArgs...)
 	if err != nil {
 		return nil, err
-	}
-
-	if s.createEmbeddingIndexAfterAddDocuments {
-		sql := fmt.Sprintf(`SET @index_name = '%s_embedding_idx';
-	SET @table_name = '%s';
-
-	SELECT COUNT(*)
-	INTO @index_exists
-	FROM information_schema.statistics
-	WHERE table_schema = DATABASE()
-		AND table_name = @table_name
-		AND index_name = @index_name;
-
-	SET @sql = IF(@index_exists = 0, CONCAT('CREATE VECTOR INDEX M=8 DISTANCE=cosine', @index_name, ' ON ', @table_name, ' (embedding)'), 'SELECT ''Index already exists''');
-
-	PREPARE stmt FROM @sql;
-	EXECUTE stmt;
-	DEALLOCATE PREPARE stmt;`, s.embeddingTableName, s.embeddingTableName)
-		if _, err := s.db.ExecContext(ctx, sql); err != nil {
-			return nil, err
-		}
 	}
 
 	return ids, nil
