@@ -307,6 +307,11 @@ func (s Store) SimilaritySearch(
 	}
 	dims := len(embedderData)
 
+	err = s.printExplainData(ctx, collectionName, dims, pgvector.NewVector(embedderData))
+	if err != nil {
+		return nil, err
+	}
+
 	err = s.printEmbeddingRowsOfSameLength(ctx, dims)
 	if err != nil {
 		return nil, err
@@ -393,6 +398,54 @@ func (s *Store) printEmbeddingRowsOfSameLength(ctx context.Context, dims int) er
 		}
 
 		fmt.Printf("DUSTIN: printEmbeddingRowsOfSameLength: %s, %s\n", collectionID, document)
+	}
+	return rows.Err()
+}
+
+func (s *Store) printExplainData(ctx context.Context, collectionName string, dims int, vec pgvector.Vector) error {
+	sql := fmt.Sprintf(`WITH filtered_embedding_dims AS MATERIALIZED (
+    SELECT
+        *
+    FROM
+        %s
+    WHERE
+        vector_dims (
+                embedding
+        ) = $1
+)
+SELECT
+	data.document,
+	data.cmetadata,
+	(1 - data.distance) AS score
+FROM (
+	SELECT
+		filtered_embedding_dims.*,
+		embedding <=> $2 AS distance
+	FROM
+		filtered_embedding_dims
+		JOIN %s ON filtered_embedding_dims.collection_id=%s.uuid WHERE %s.name='%s') AS data`,
+		s.embeddingTableName, s.collectionTableName, s.collectionTableName, s.collectionTableName, collectionName)
+
+	rows, err := s.conn.Query(ctx, sql, dims, vec)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	//docs := make([]schema.Document, 0)
+	for rows.Next() {
+		//var collectionID string
+		//var embedding string
+		//var document string
+		//cmetadata := dsql.NullString{}
+		//var score float64
+		var output string
+		//var uuidStr string
+		if err := rows.Scan(&output); err != nil {
+			return err
+		}
+
+		fmt.Printf("DUSTIN: printExplainData: %s \n", output)
 	}
 	return rows.Err()
 }
