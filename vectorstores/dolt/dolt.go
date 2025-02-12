@@ -132,9 +132,9 @@ func (s Store) createEmbeddingTableIfNotExists(ctx context.Context, tx *sql.Tx) 
 	document longtext,
 	cmetadata json,
 	`+"`uuid`"+` varchar(36) NOT NULL,
-	CONSTRAINT langchain_dolt_embedding_collection_id_fkey
+	CONSTRAINT %s_collection_id_fkey
 	FOREIGN KEY (collection_id) REFERENCES %s (uuid) ON DELETE CASCADE,
-	PRIMARY KEY (uuid))`, s.embeddingTableName, s.collectionTableName)
+	PRIMARY KEY (uuid))`, s.embeddingTableName, s.embeddingTableName, s.collectionTableName)
 	if _, err := tx.ExecContext(ctx, sql); err != nil {
 		return err
 	}
@@ -296,7 +296,7 @@ func (s Store) SimilaritySearch(
 		whereQuerys = append(whereQuerys, fmt.Sprintf("data.distance < %f", 1-scoreThreshold))
 	}
 	for k, v := range filter {
-		whereQuerys = append(whereQuerys, fmt.Sprintf("(data.cmetadata ->> '%s') = '%s'", k, v))
+		whereQuerys = append(whereQuerys, fmt.Sprintf("JSON_UNQUOTE(JSON_EXTRACT(data.cmetadata, '$.%s')) = '%s'", k, v))
 	}
 	whereQuery := strings.Join(whereQuerys, " AND ")
 	if len(whereQuery) == 0 {
@@ -368,8 +368,10 @@ ORDER BY
 		}
 
 		var metadataMap map[string]any
-		if err := json.Unmarshal([]byte(metadata), &metadataMap); err != nil {
-			return nil, err
+		if metadata != "" {
+			if err := json.Unmarshal([]byte(metadata), &metadataMap); err != nil {
+				return nil, err
+			}
 		}
 
 		docs = append(docs, schema.Document{
@@ -528,7 +530,7 @@ func (s Store) Search(
 	}
 	whereQuerys := make([]string, 0)
 	for k, v := range filter {
-		whereQuerys = append(whereQuerys, fmt.Sprintf("(%s.cmetadata ->> '%s') = '%s'", s.embeddingTableName, k, v))
+		whereQuerys = append(whereQuerys, fmt.Sprintf("JSON_UNQUOTE(JSON_EXTRACT(%s.cmetadata, '$.%s')) = '%s'", s.embeddingTableName, k, v))
 	}
 	whereQuery := strings.Join(whereQuerys, " AND ")
 	if len(whereQuery) == 0 {
@@ -552,9 +554,19 @@ LIMIT ?`, s.embeddingTableName, s.embeddingTableName, s.embeddingTableName,
 
 	for rows.Next() {
 		doc := schema.Document{}
-		if err := rows.Scan(&doc.PageContent, &doc.Metadata); err != nil {
+		var metadata string
+		if err := rows.Scan(&doc.PageContent, &metadata); err != nil {
 			return nil, err
 		}
+
+		var metadataMap map[string]any
+		if metadata != "" {
+			if err := json.Unmarshal([]byte(metadata), &metadataMap); err != nil {
+				return nil, err
+			}
+		}
+
+		doc.Metadata = metadataMap
 		docs = append(docs, doc)
 	}
 	return docs, rows.Err()
