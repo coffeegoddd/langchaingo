@@ -360,7 +360,7 @@ func TestDoltStoreRestWithScoreThreshold(t *testing.T) {
 		ctx,
 		"Which of these are cities in Japan",
 		10,
-		vectorstores.WithScoreThreshold(0.8),
+		vectorstores.WithScoreThreshold(0.6), // Dolt uses euclidean squared distance
 	)
 	require.NoError(t, err)
 	require.Len(t, docs, 6)
@@ -408,16 +408,17 @@ func TestDoltStoreSimilarityScore(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// test with a score threshold of 0.8, expected 6 documents
+	// Dolt uses euclidean squared distance
+	// test with a score threshold of 0.6, expected 6 documents
 	docs, err := store.SimilaritySearch(
 		ctx,
 		"What is the capital city of Japan?",
 		3,
-		vectorstores.WithScoreThreshold(0.8),
+		vectorstores.WithScoreThreshold(0.6),
 	)
 	require.NoError(t, err)
 	require.Len(t, docs, 1)
-	require.True(t, docs[0].Score > 0.9)
+	require.True(t, docs[0].Score > 0.8)
 }
 
 func TestSimilaritySearchWithInvalidScoreThreshold(t *testing.T) {
