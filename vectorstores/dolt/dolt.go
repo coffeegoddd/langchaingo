@@ -99,7 +99,6 @@ func (s *Store) init(ctx context.Context) error {
 	if err := s.createEmbeddingTableIfNotExists(ctx, tx); err != nil {
 		return err
 	}
-	// todo: should we create the vector index here?
 	if s.preDeleteDatabase {
 		if err := s.RemoveDatabase(ctx, tx); err != nil {
 			return err
@@ -330,27 +329,6 @@ ORDER BY
     data.distance
     LIMIT ?`, s.embeddingTableName, s.collectionTableName, databaseName, whereQuery)
 
-	// todo : remove all these
-	// err = s.printExplainData(ctx, databaseName, dims, jsonEmbedding)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	// err = s.printEmbeddingRowsOfSameLength(ctx, dims)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	err = s.printData(ctx, databaseName, dims, jsonEmbedding)
-	if err != nil {
-		return nil, err
-	}
-
-	err = s.printDataWithOrderBy(ctx, databaseName, whereQuery, dims, jsonEmbedding)
-	if err != nil {
-		return nil, err
-	}
-
 	rows, err := s.db.QueryContext(ctx, sql, jsonEmbedding, dims, numDocuments)
 	if err != nil {
 		return nil, err
@@ -381,139 +359,6 @@ ORDER BY
 		})
 	}
 	return docs, rows.Err()
-}
-
-func (s *Store) printEmbeddingRowsOfSameLength(ctx context.Context, dims int) error {
-	sql := fmt.Sprintf("SELECT * FROM %s WHERE JSON_LENGTH(embedding) = ?", s.embeddingTableName)
-	rows, err := s.db.QueryContext(ctx, sql, dims)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	//docs := make([]schema.Document, 0)
-	for rows.Next() {
-		var collectionID string
-		var embedding string
-		var document string
-		var cmetadata string
-		var uuidStr string
-		if err := rows.Scan(&collectionID, &embedding, &document, &cmetadata, &uuidStr); err != nil {
-			return err
-		}
-
-		fmt.Printf("DUSTIN: printEmbeddingRowsOfSameLength: %s, %s, %s\n", uuidStr, collectionID, document)
-	}
-	return rows.Err()
-}
-
-func (s *Store) printExplainData(ctx context.Context, databaseName string, dims int, jsonEmbedding []byte) error {
-	sql := fmt.Sprintf(`EXPLAIN PLAN SELECT
-    data.document,
-    data.cmetadata,
-    (1 - data.distance) AS score
-FROM
-(
-    SELECT
-        f.*,
-        VEC_DISTANCE(f.embedding, ?) AS distance
-    FROM
-        (SELECT * FROM %s WHERE JSON_LENGTH(embedding) = ?) AS f
-        JOIN %s AS t ON f.collection_id = t.uuid
-    WHERE
-        t.name = '%s'
-) AS data;`, s.embeddingTableName, s.collectionTableName, databaseName)
-
-	var queryPlan string
-	row := s.db.QueryRowContext(ctx, sql)
-	err := row.Scan(&queryPlan)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("DUSTIN: printExplainPlanData: %s\n", queryPlan)
-	return nil
-}
-
-func (s *Store) printData(ctx context.Context, databaseName string, dims int, jsonEmbedding []byte) error {
-	sql := fmt.Sprintf(`SELECT
-    data.document,
-    data.cmetadata,
-    (1 - data.distance) AS score
-FROM
-(
-    SELECT
-        f.*,
-        VEC_DISTANCE(f.embedding, ?) AS distance
-    FROM
-        (SELECT * FROM %s WHERE JSON_LENGTH(embedding) = ?) AS f
-        JOIN %s AS t ON f.collection_id = t.uuid
-    WHERE
-        t.name = '%s'
-) AS data;`, s.embeddingTableName, s.collectionTableName, databaseName)
-
-	rows, err := s.db.QueryContext(ctx, sql, jsonEmbedding, dims)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	//docs := make([]schema.Document, 0)
-	for rows.Next() {
-		//var collectionID string
-		//var embedding string
-		var document string
-		var cmetadata string
-		var score float64
-		//var uuidStr string
-		if err := rows.Scan(&document, &cmetadata, &score); err != nil {
-			return err
-		}
-
-		fmt.Printf("DUSTIN: printData: %s, %s, %f\n", document, cmetadata, score)
-	}
-	return rows.Err()
-}
-
-func (s *Store) printDataWithOrderBy(ctx context.Context, databaseName, whereQuery string, dims int, jsonEmbedding []byte) error {
-	sql := fmt.Sprintf(`SELECT
-    data.document,
-    data.cmetadata,
-    (1 - data.distance) AS score
-FROM
-(
-    SELECT
-        f.*,
-        VEC_DISTANCE(f.embedding, ?) AS distance
-    FROM
-        (SELECT * FROM %s WHERE JSON_LENGTH(embedding) = ?) AS f
-        JOIN %s AS t ON f.collection_id = t.uuid
-    WHERE
-        t.name = '%s'
-) AS data WHERE %s
-ORDER BY
-    data.distance`, s.embeddingTableName, s.collectionTableName, databaseName, whereQuery)
-
-	rows, err := s.db.QueryContext(ctx, sql, jsonEmbedding, dims)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	//docs := make([]schema.Document, 0)
-	for rows.Next() {
-		//var collectionID string
-		//var embedding string
-		var document string
-		var cmetadata string
-		var score float64
-		//var uuidStr string
-		if err := rows.Scan(&document, &cmetadata, &score); err != nil {
-			return err
-		}
-
-		fmt.Printf("DUSTIN: printDataWithOrderBy: %s, %s, %f\n", document, cmetadata, score)
-	}
-	return rows.Err()
 }
 
 //nolint:cyclop
