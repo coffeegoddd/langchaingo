@@ -382,6 +382,11 @@ LIMIT
 	//		whereQuery)
 
 	//fmt.Println("DUSTIN: jsonEmbedding", jsonEmbedding)
+	err = s.printExplainData(ctx, databaseName, jsonEmbedding)
+	if err != nil {
+		return nil, err
+	}
+
 	err = s.printEmbeddingRowsOfSameLength(ctx)
 	if err != nil {
 		return nil, err
@@ -425,6 +430,60 @@ LIMIT
 		})
 	}
 	return docs, rows.Err()
+}
+
+func (s *Store) printExplainData(ctx context.Context, databaseName string, jsonEmbedding []byte) error {
+	sql := fmt.Sprintf(`EXPLAIN WITH filtered_embedding_dims AS (
+    SELECT
+        *
+    FROM
+        %s
+)
+SELECT
+    data.document,
+    data.cmetadata,
+    (1 - data.distance) AS score
+FROM
+(
+    SELECT
+        f.*,
+        VEC_DISTANCE_COSINE(f.embedding, Vec_FromText(?)) AS distance
+    FROM
+        filtered_embedding_dims AS f
+        JOIN %s AS t ON f.collection_id = t.uuid
+    WHERE
+        t.name = '%s'
+) AS data`, s.embeddingTableName, s.collectionTableName, databaseName)
+
+	var id string
+	var selectType string
+	var table string
+	var tType string
+	var possibleKeys string
+	var key string
+	var keyLen string
+	var ref string
+	var rows string
+	var extra string
+
+	row := s.db.QueryRowContext(ctx, sql, jsonEmbedding)
+	err := row.Scan(&id, &selectType, &table, &tType, &possibleKeys, &key, &keyLen, &ref, &rows, &extra)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("DUSTIN: mariadb: explain select: id: %s\n", id)
+	fmt.Printf("DUSTIN: mariadb: explain select: select_type: %s\n", selectType)
+	fmt.Printf("DUSTIN: mariadb: explain select: table: %s\n", table)
+	fmt.Printf("DUSTIN: mariadb: explain select: type: %s\n", tType)
+	fmt.Printf("DUSTIN: mariadb: explain select: possible_keys: %s\n", possibleKeys)
+	fmt.Printf("DUSTIN: mariadb: explain select: key: %s\n", key)
+	fmt.Printf("DUSTIN: mariadb: explain select: key_len: %s\n", keyLen)
+	fmt.Printf("DUSTIN: mariadb: explain select: ref: %s\n", ref)
+	fmt.Printf("DUSTIN: mariadb: explain select: rows: %s\n", rows)
+	fmt.Printf("DUSTIN: mariadb: explain select: Extra: %s\n", extra)
+
+	return nil
 }
 
 func (s *Store) printEmbeddingRowsOfSameLength(ctx context.Context) error {
