@@ -158,6 +158,7 @@ DEALLOCATE PREPARE stmt;`, s.embeddingTableName, s.embeddingTableName)
 		return err
 	}
 
+	// Dolt currently only supports euclidean squared vector indexes
 	if !s.createEmbeddingIndexAfterAddDocuments {
 		sql = fmt.Sprintf(`SET @index_name = '%s_embedding_idx';
 SET @table_name = '%s';
@@ -240,6 +241,7 @@ func (s Store) AddDocuments(
 		return nil, err
 	}
 
+	// Dolt currently only supports euclidean squared vector indexes
 	if s.createEmbeddingIndexAfterAddDocuments {
 		sql = fmt.Sprintf(`SET @index_name = '%s_embedding_idx';
 	SET @table_name = '%s';
@@ -308,6 +310,7 @@ func (s Store) SimilaritySearch(
 		return nil, err
 	}
 
+	// Dolt currently only supports euclidean squared vector distance
 	sql := fmt.Sprintf(`SELECT
     data.document,
     data.cmetadata,
@@ -322,15 +325,10 @@ FROM
         JOIN %s AS t ON f.collection_id = t.uuid
     WHERE
         t.name = '%s'
-) AS data
-WHERE %s
+) AS data WHERE %s
 ORDER BY
     data.distance
-LIMIT	
-    ?;`, s.embeddingTableName,
-		s.collectionTableName,
-		databaseName,
-		whereQuery)
+    LIMIT ?`, s.embeddingTableName, s.collectionTableName, databaseName, whereQuery)
 
 	// todo : remove all these
 	// err = s.printExplainData(ctx, databaseName, dims, jsonEmbedding)
@@ -353,7 +351,7 @@ LIMIT
 		return nil, err
 	}
 
-	rows, err := s.db.QueryContext(ctx, sql, dims, jsonEmbedding, numDocuments)
+	rows, err := s.db.QueryContext(ctx, sql, jsonEmbedding, dims, numDocuments)
 	if err != nil {
 		return nil, err
 	}
@@ -475,15 +473,7 @@ FROM
 }
 
 func (s *Store) printDataWithOrderBy(ctx context.Context, databaseName, whereQuery string, dims int, jsonEmbedding []byte) error {
-	sql := fmt.Sprintf(`WITH filtered_embedding_dims AS (
-    SELECT
-        *
-    FROM
-        %s
-    WHERE
-        JSON_LENGTH(embedding) = ?
-)
-SELECT
+	sql := fmt.Sprintf(`SELECT
     data.document,
     data.cmetadata,
     (1 - data.distance) AS score
@@ -493,7 +483,7 @@ FROM
         f.*,
         VEC_DISTANCE(f.embedding, ?) AS distance
     FROM
-        filtered_embedding_dims AS f
+        (SELECT * FROM %s WHERE JSON_LENGTH(embedding) = ?) AS f
         JOIN %s AS t ON f.collection_id = t.uuid
     WHERE
         t.name = '%s'
