@@ -92,6 +92,7 @@ func (di *testDoltServer) Start() error {
 	require.NoError(di.t, err)
 
 	di.CmdDir = tmpDir
+	fmt.Println("DUSTIN: tmpDir:", tmpDir)
 
 	doltInit := exec.Command(mustGetDoltExec(di.t), "init")
 	doltInit.Env = os.Environ()
