@@ -87,7 +87,7 @@ func (s Store) Close() error {
 	return nil
 }
 
-func (s *Store) init(ctx context.Context) error {
+func (s Store) init(ctx context.Context) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -125,6 +125,7 @@ func (s Store) createCollectionTableIfNotExists(ctx context.Context, tx *sql.Tx)
 }
 
 func (s Store) createEmbeddingTableIfNotExists(ctx context.Context, tx *sql.Tx) error {
+	//nolint:gosec
 	sql := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
 collection_id varchar(36),
 embedding json,
@@ -184,6 +185,8 @@ DEALLOCATE PREPARE stmt;`, s.embeddingTableName, s.embeddingTableName)
 
 // AddDocuments adds documents to the Dolt database associated with 'Store'.
 // and returns the ids of the added documents.
+//
+//nolint:cyclop
 func (s Store) AddDocuments(
 	ctx context.Context,
 	docs []schema.Document,
@@ -265,8 +268,7 @@ func (s Store) AddDocuments(
 	return ids, nil
 }
 
-//nolint:funlen
-//nolint:cyclop
+//nolint:cyclop,funlen
 func (s Store) SimilaritySearch(
 	ctx context.Context,
 	query string,
@@ -433,16 +435,17 @@ func (s Store) RemoveDatabase(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
-func (s *Store) createOrGetDatabase(ctx context.Context, tx *sql.Tx) error {
+func (s Store) createOrGetDatabase(ctx context.Context, tx *sql.Tx) error {
 	jsonMetadata, err := json.Marshal(s.databaseMetadata)
 	if err != nil {
 		return err
 	}
-	sql := fmt.Sprintf(`INSERT INTO %s (`+"`uuid`"+`, name, cmetadata) VALUES(?, ?, ?) ON DUPLICATE KEY UPDATE cmetadata = ?`, s.collectionTableName)
+	//nolint:gosec
+	sql := fmt.Sprintf("INSERT INTO %s (`uuid`, name, cmetadata) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE cmetadata = ?", s.collectionTableName)
 	if _, err := tx.ExecContext(ctx, sql, uuid.New().String(), s.databaseName, jsonMetadata, jsonMetadata); err != nil {
 		return err
 	}
-	sql = fmt.Sprintf(`SELECT `+"`uuid`"+` FROM %s WHERE name = ? ORDER BY name limit 1`, s.collectionTableName)
+	sql = fmt.Sprintf("SELECT `uuid` FROM %s WHERE name = ? ORDER BY name limit 1", s.collectionTableName)
 	return tx.QueryRowContext(ctx, sql, s.databaseName).Scan(&s.databaseUUID)
 }
 

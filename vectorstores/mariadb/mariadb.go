@@ -86,7 +86,7 @@ func (s Store) Close() error {
 	return nil
 }
 
-func (s *Store) init(ctx context.Context) error {
+func (s Store) init(ctx context.Context) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -128,6 +128,7 @@ func (s Store) createEmbeddingTableIfNotExists(ctx context.Context, tx *sql.Tx) 
 	if s.vectorDimensions == 0 {
 		return fmt.Errorf("vector dimensions must be greater than zero")
 	}
+	//nolint:gosec
 	sql := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
 collection_id varchar(36),
 embedding VECTOR(%d) NOT NULL,
@@ -213,7 +214,7 @@ func (s Store) AddDocuments(
 	return ids, nil
 }
 
-//nolint:cyclop
+//nolint:cyclop,funlen
 func (s Store) SimilaritySearch(
 	ctx context.Context,
 	query string,
@@ -386,11 +387,12 @@ func (s Store) RemoveDatabase(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
-func (s *Store) createOrGetDatabase(ctx context.Context, tx *sql.Tx) error {
+func (s Store) createOrGetDatabase(ctx context.Context, tx *sql.Tx) error {
 	jsonMetadata, err := json.Marshal(s.databaseMetadata)
 	if err != nil {
 		return err
 	}
+	//nolint:gosec
 	sql := fmt.Sprintf(`INSERT INTO %s (`+"`uuid`"+`, name, cmetadata)
 		VALUES(?, ?, ?) ON DUPLICATE KEY UPDATE cmetadata = ?`, s.collectionTableName)
 	if _, err := tx.ExecContext(ctx, sql, uuid.New().String(), s.databaseName, jsonMetadata, jsonMetadata); err != nil {

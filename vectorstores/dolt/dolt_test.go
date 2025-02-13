@@ -32,6 +32,7 @@ import (
 )
 
 var (
+	//nolint:gochecknoglobals
 	doltExec string
 	//nolint:gochecknoglobals
 	doltExecOnce sync.Once
@@ -54,8 +55,8 @@ type testDoltServer struct {
 	Password       string
 }
 
-//nolint:unexported-return
-func NewTestDoltServer(t *testing.T) *testDoltServer {
+func newTestDoltServer(t *testing.T) *testDoltServer {
+	t.Helper()
 	return &testDoltServer{
 		t:              t,
 		Waited:         make(chan bool),
@@ -126,12 +127,12 @@ func (di *testDoltServer) Start() error {
 	di.Port = port
 	di.Password = ""
 
-	di.Cmd = exec.Command(
+	di.Cmd = exec.Command( //nolint:gosec
 		mustGetDoltExec(di.t),
 		"sql-server",
 		"--host", di.Host,
 		"--port", di.Port,
-	) //nolint:gosec
+	)
 
 	di.Cmd.Env = di.Cmd.Environ()
 	di.Cmd.Dir = di.CmdDir
@@ -197,7 +198,7 @@ func (di *testDoltServer) Shutdown() error {
 
 	killed := false
 	if runtime.GOOS == "windows" {
-		kill := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(di.Cmd.Process.Pid))
+		kill := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(di.Cmd.Process.Pid)) //nolint:gosec
 		kill.Stdout = os.Stdout
 		kill.Stderr = os.Stderr
 		err := kill.Run()
@@ -256,7 +257,7 @@ func preCheckEnvSetting(t *testing.T) string {
 
 	doltURL := os.Getenv("DOLT_CONNECTION_STRING")
 	if doltURL == "" {
-		di := NewTestDoltServer(t)
+		di := newTestDoltServer(t)
 		err := di.Start()
 		if err != nil && strings.Contains(err.Error(), "Cannot connect to the Docker daemon") {
 			t.Skip("Docker not available")
