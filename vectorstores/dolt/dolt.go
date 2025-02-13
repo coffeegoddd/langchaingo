@@ -2,14 +2,14 @@ package dolt
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"strings"
 
-	"database/sql"
-	"encoding/json"
-
+	// required for mysql driver used by Dolt.
 	_ "github.com/go-sql-driver/mysql"
 
 	"github.com/google/uuid"
@@ -25,7 +25,7 @@ var (
 	ErrUnsupportedOptions         = errors.New("unsupported options")
 )
 
-// DB represents both a sql.DB and sql.Tx
+// DB represents both a sql.DB and sql.Tx.
 type DB interface {
 	PingContext(ctx context.Context) error
 	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error)
@@ -126,14 +126,14 @@ func (s Store) createCollectionTableIfNotExists(ctx context.Context, tx *sql.Tx)
 
 func (s Store) createEmbeddingTableIfNotExists(ctx context.Context, tx *sql.Tx) error {
 	sql := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
-	collection_id varchar(36),
-	embedding json,
-	document longtext,
-	cmetadata json,
-	`+"`uuid`"+` varchar(36) NOT NULL,
-	CONSTRAINT %s_collection_id_fkey
-	FOREIGN KEY (collection_id) REFERENCES %s (uuid) ON DELETE CASCADE,
-	PRIMARY KEY (uuid))`, s.embeddingTableName, s.embeddingTableName, s.collectionTableName)
+collection_id varchar(36),
+embedding json,
+document longtext,
+cmetadata json,
+`+"`uuid`"+` varchar(36) NOT NULL,
+CONSTRAINT %s_collection_id_fkey
+FOREIGN KEY (collection_id) REFERENCES %s (uuid) ON DELETE CASCADE,
+PRIMARY KEY (uuid))`, s.embeddingTableName, s.embeddingTableName, s.collectionTableName)
 	if _, err := tx.ExecContext(ctx, sql); err != nil {
 		return err
 	}
@@ -265,6 +265,7 @@ func (s Store) AddDocuments(
 	return ids, nil
 }
 
+//nolint:funlen
 //nolint:cyclop
 func (s Store) SimilaritySearch(
 	ctx context.Context,
@@ -437,8 +438,7 @@ func (s *Store) createOrGetDatabase(ctx context.Context, tx *sql.Tx) error {
 	if err != nil {
 		return err
 	}
-	sql := fmt.Sprintf(`INSERT INTO %s (`+"`uuid`"+`, name, cmetadata)
-		VALUES(?, ?, ?) ON DUPLICATE KEY UPDATE cmetadata = ?`, s.collectionTableName)
+	sql := fmt.Sprintf(`INSERT INTO %s (`+"`uuid`"+`, name, cmetadata) VALUES(?, ?, ?) ON DUPLICATE KEY UPDATE cmetadata = ?`, s.collectionTableName)
 	if _, err := tx.ExecContext(ctx, sql, uuid.New().String(), s.databaseName, jsonMetadata, jsonMetadata); err != nil {
 		return err
 	}
