@@ -2,14 +2,14 @@ package mariadb
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"strings"
 
-	"database/sql"
-	"encoding/json"
-
+	// required for mysql driver used by MariaDB.
 	_ "github.com/go-sql-driver/mysql"
 
 	"github.com/google/uuid"
@@ -25,7 +25,7 @@ var (
 	ErrUnsupportedOptions         = errors.New("unsupported options")
 )
 
-// DB represents both a sql.DB and sql.Tx
+// DB represents both a sql.DB and sql.Tx.
 type DB interface {
 	PingContext(ctx context.Context) error
 	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error)
@@ -129,16 +129,16 @@ func (s Store) createEmbeddingTableIfNotExists(ctx context.Context, tx *sql.Tx) 
 		return fmt.Errorf("vector dimensions must be greater than zero")
 	}
 	sql := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
-	collection_id varchar(36),
-	embedding VECTOR(%d) NOT NULL,
-	document longtext,
-	cmetadata json,
-	`+"`uuid`"+` varchar(36) NOT NULL,
-	INDEX %s_collection_id (collection_id),
-    VECTOR INDEX %s_embedding (embedding) M=8 DISTANCE=cosine,
-	CONSTRAINT %s_collection_id_fkey
-	FOREIGN KEY (collection_id) REFERENCES %s (uuid) ON DELETE CASCADE,
-	PRIMARY KEY (uuid))`,
+collection_id varchar(36),
+embedding VECTOR(%d) NOT NULL,
+document longtext,
+cmetadata json,
+`+"`uuid`"+` varchar(36) NOT NULL,
+INDEX %s_collection_id (collection_id),
+VECTOR INDEX %s_embedding (embedding) M=8 DISTANCE=cosine,
+CONSTRAINT %s_collection_id_fkey
+FOREIGN KEY (collection_id) REFERENCES %s (uuid) ON DELETE CASCADE,
+PRIMARY KEY (uuid))`,
 		s.embeddingTableName,
 		s.vectorDimensions,
 		s.embeddingTableName,

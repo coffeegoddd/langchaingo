@@ -31,8 +31,11 @@ import (
 	"github.com/tmc/langchaingo/vectorstores/dolt"
 )
 
-var doltExec string
-var doltExecOnce sync.Once
+var (
+	doltExec string
+	//nolint:gochecknoglobals
+	doltExecOnce sync.Once
+)
 
 type testDoltServer struct {
 	t              *testing.T
@@ -51,6 +54,7 @@ type testDoltServer struct {
 	Password       string
 }
 
+//nolint:unexported-return
 func NewTestDoltServer(t *testing.T) *testDoltServer {
 	return &testDoltServer{
 		t:              t,
@@ -61,6 +65,8 @@ func NewTestDoltServer(t *testing.T) *testDoltServer {
 }
 
 func mustGetDoltExec(t *testing.T) string {
+	t.Helper()
+
 	doltCommand := "dolt"
 	if runtime.GOOS == "windows" {
 		doltCommand = "dolt.exe"
@@ -90,13 +96,14 @@ func (di *testDoltServer) ConnectionString() string {
 	return fmt.Sprintf("%s:%s@(%s:%s)/%s?parseTime=true&multiStatements=true", "root", di.Password, di.Host, di.Port, di.Name)
 }
 
+//nolint:funlen
 func (di *testDoltServer) Start() error {
 	tmpDir, err := os.MkdirTemp("", "dolt-vectorstore-tests*")
 	require.NoError(di.t, err)
 
 	di.CmdDir = tmpDir
 
-	doltInit := exec.Command(mustGetDoltExec(di.t), "init")
+	doltInit := exec.Command(mustGetDoltExec(di.t), "init") //nolint:gosec
 	doltInit.Env = os.Environ()
 	doltInit.Dir = tmpDir
 	doltInit.Stdout = os.Stdout
@@ -104,7 +111,7 @@ func (di *testDoltServer) Start() error {
 	err = doltInit.Run()
 	require.NoError(di.t, err)
 
-	createDB := exec.Command(mustGetDoltExec(di.t), "sql", "-q", fmt.Sprintf("CREATE DATABASE %s;", di.Name))
+	createDB := exec.Command(mustGetDoltExec(di.t), "sql", "-q", fmt.Sprintf("CREATE DATABASE %s;", di.Name)) //nolint:gosec
 	createDB.Env = os.Environ()
 	createDB.Dir = tmpDir
 	createDB.Stdout = os.Stdout
@@ -124,8 +131,7 @@ func (di *testDoltServer) Start() error {
 		"sql-server",
 		"--host", di.Host,
 		"--port", di.Port,
-		//"-l", "debug",
-	)
+	) //nolint:gosec
 
 	di.Cmd.Env = di.Cmd.Environ()
 	di.Cmd.Dir = di.CmdDir
@@ -144,7 +150,10 @@ func (di *testDoltServer) Start() error {
 
 	go func() {
 		var buffer bytes.Buffer
-		buffer.ReadFrom(di.Stderr)
+		_, err := buffer.ReadFrom(di.Stderr)
+		if err != nil {
+			panic(err)
+		}
 		di.StderrString = buffer.String()
 		close(di.StderrCaptured)
 	}()
@@ -168,7 +177,10 @@ func (di *testDoltServer) Start() error {
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
-		di.Shutdown()
+		err = di.Shutdown()
+		if err != nil {
+			panic(err)
+		}
 		close(dbChan)
 	}()
 	di.db = <-dbChan
@@ -228,7 +240,11 @@ func getFreePort() (string, error) {
 		return "", err
 	}
 	defer l.Close()
-	return fmt.Sprintf("%d", l.Addr().(*net.TCPAddr).Port), nil
+	addr, ok := l.Addr().(*net.TCPAddr)
+	if !ok {
+		return "", errors.New("failed to get port")
+	}
+	return fmt.Sprintf("%d", addr.Port), nil
 }
 
 func preCheckEnvSetting(t *testing.T) string {
