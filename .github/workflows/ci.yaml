@@ -39,11 +39,17 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
+      - name: Install Dolt
+        run: |
+          bash -c 'curl -L https://github.com/dolthub/dolt/releases/download/v${DOLT_VERSION}/install.sh | bash'
+          /usr/local/bin/dolt version
+        env:
+          DOLT_VERSION: 1.49.1
       - name: Build
         run: go build -v ./...
       - name: Test
         env:
+          DOLT_BIN: /usr/local/bin/dolt
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GENAI_API_KEY: ${{ secrets.GENAI_API_KEY }}
         run: go test -v ./... -race
-
